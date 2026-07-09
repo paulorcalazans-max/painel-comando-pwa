@@ -1,4 +1,4 @@
-const CACHE_NAME = "painel-comando-v3";
+const CACHE_NAME = "painel-comando-v4";
 const ASSETS = [
   "./",
   "./index.html",
