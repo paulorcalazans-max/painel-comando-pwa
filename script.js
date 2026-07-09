@@ -400,34 +400,142 @@ function renderBatimentos(){
     </div>`;
   document.getElementById("view-batimentos").innerHTML = formWrap("Registrar batimentos", html, "saveBatimentos") + recentTable("batimentos");
 }
-function saveBatimentos(e){ saveGeneric(e,"batimentos","Medição salva."); }
-
-function saveGeneric(e,type,msg){
+function salvarGenerico(e, tipo, mensagem) {
   e.preventDefault();
-  const rec = Object.fromEntries(new FormData(e.target).entries());
-  rec.id = uid();
-  state.records[type].push(rec);
-  saveState(); e.target.reset(); toast(msg); render();
-}
 
-function recentTable(type){
+  const formulario = e.target;
+  const registro = Object.fromEntries(new FormData(formulario).entries());
+  const editId = formulario.dataset.editId;
+
+  if (editId) {
+    registro.id = editId;
+
+    const indice = estado.registros[tipo].findIndex(r => r.id === editId);
+
+    if (indice !== -1) {
+      estado.registros[tipo][indice] = {
+        ...estado.registros[tipo][indice],
+        ...registro
+      };
+
+      delete formulario.dataset.editId;
+
+      const botao = formulario.querySelector('button[type="submit"]');
+
+      if (botao) {
+        botao.textContent = "Salvar";
+      }
+
+      salvarEstado();
+      formulario.reset();
+      brinde("Registro atualizado.");
+      render();
+      return;
+    }
+  }
+
+  registro.id = uid();
+  estado.registros[tipo].push(registro);
+
+  salvarEstado();
+  formulario.reset();
+  brinde(mensagem);
+  render();
+}
   const rows = state.records[type].slice(-8).reverse();
   if(!rows.length) return `<div class="card"><h3>Histórico recente</h3><p class="small">Nenhum registro ainda.</p></div>`;
   return `<div class="card"><h3>Histórico recente</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Resumo</th><th>Ação</th></tr></thead><tbody>${rows.map(r=>`
     <tr><td>${brDate(r.data)}</td><td>${summaryRecord(type,r)}</td><td><button class="ghost" onclick="deleteRecord('${type}','${r.id}')">Excluir</button></td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
-function deleteRecord(type,id){
-  if(!confirm("Excluir este registro?")) return;
-  state.records[type] = state.records[type].filter(r=>r.id !== id);
-  saveState(); toast("Registro excluído."); render();
+function tabelaRecente(tipo){
+  const linhas = estado.registros[tipo].slice(-8).reverse();
+
+  if(!linhas.comprimento) {
+    return `<div class="card"><h3>Histórico recente</h3><p class="small">Nenhum registro ainda.</p></div>`;
+  }
+
+  return `
+    <div class="card">
+      <h3>Histórico recente</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Resumo</th>
+              <th>Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${linhas.map(r => `
+              <tr>
+                <td>${brData(r.data)}</td>
+                <td>${registroDeResumo(tipo,r)}</td>
+                <td>
+                  <button class="ghost" onclick="editarRegistro('${tipo}','${r.id}')">Editar</button>
+                  <button class="ghost" onclick="excluirRegistro('${tipo}','${r.id}')">Excluir</button>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
-function renderHistorico(){
-  const all = [];
-  for(const [type, arr] of Object.entries(state.records)){
-    arr.forEach(r=>all.push({type, ...r}));
+function editarRegistro(tipo, id){
+  const registro = estado.registros[tipo].find(r => r.id === id);
+
+  if(!registro){
+    brinde("Registro não encontrado.");
+    return;
   }
+
+  definirVisao(tipo);
+
+  setTimeout(() => {
+    const formulario = document.querySelector(`#view-${tipo} form`);
+
+    if(!formulario){
+      brinde("Formulário não encontrado.");
+      return;
+    }
+
+    formulario.dataset.editId = id;
+
+    Object.entries(registro).forEach(([chave, valor]) => {
+      const campo = formulario.elements[chave];
+
+      if(!campo) return;
+
+      if(campo.type === "checkbox"){
+        campo.checked = Boolean(valor);
+      } else {
+        campo.value = valor ?? "";
+      }
+    });
+
+    const botao = formulario.querySelector('button[type="submit"]');
+
+    if(botao){
+      botao.textContent = "Salvar alterações";
+    }
+
+    formulario.scrollIntoView({ behavior: "smooth", block: "start" });
+    brinde("Registro aberto para edição. Altere os dados e salve.");
+  }, 100);
+}
+
+function excluirRegistro(tipo, id){
+  if(!confirm("Excluir este registro?")) return;
+
+  estado.registros[tipo] = estado.registros[tipo].filter(r => r.id !== id);
+
+  salvarEstado();
+  brinde("Registro excluído.");
+  render();
+}
   all.sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   document.getElementById("view-historico").innerHTML = `
     <div class="card">
