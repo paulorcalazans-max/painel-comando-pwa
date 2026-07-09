@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#111827" />
+  <title>Painel de Comando</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div>
+          <h1>Painel de Comando</h1>
+          <p>Pela resistência vencemos. Memento mori.</p>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button data-view="hoje" class="nav-btn active">Hoje</button>
+        <button data-view="estudo" class="nav-btn">Estudo</button>
+        <button data-view="revisao" class="nav-btn">Revisão de Estudos</button>
+        <button data-view="musculacao" class="nav-btn">Musculação</button>
+        <button data-view="corrida" class="nav-btn">Corrida</button>
+        <button data-view="sono" class="nav-btn">Sono</button>
+        <button data-view="batimentos" class="nav-btn">Batimentos</button>
+        <button data-view="historico" class="nav-btn">Histórico</button>
+        <button data-view="semanal" class="nav-btn">Painel Semanal</button>
+        <button data-view="auditoria" class="nav-btn">Auditoria Semanal</button>
+        <button data-view="backup" class="nav-btn">Backup</button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="todayLabel"></p>
+          <h2 id="viewTitle">Hoje</h2>
+        </div>
+        <div class="top-actions">
+          <button id="installBtn" class="ghost hidden">Instalar app</button>
+          <button id="notifyBtn" class="ghost">Ativar notificações</button>
+        </div>
+      </header>
+
+      <section id="quoteBox" class="quote-card">
+        <strong>Pela resistência vencemos. Memento mori.</strong>
+        <span id="rotatingQuote"></span>
+      </section>
+
+      <section id="view-hoje" class="view active"></section>
+      <section id="view-estudo" class="view"></section>
+      <section id="view-revisao" class="view"></section>
+      <section id="view-musculacao" class="view"></section>
+      <section id="view-corrida" class="view"></section>
+      <section id="view-sono" class="view"></section>
+      <section id="view-batimentos" class="view"></section>
+      <section id="view-historico" class="view"></section>
+      <section id="view-semanal" class="view"></section>
+      <section id="view-auditoria" class="view"></section>
+      <section id="view-backup" class="view"></section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="script.js"></script>
+</body>
+</html>
