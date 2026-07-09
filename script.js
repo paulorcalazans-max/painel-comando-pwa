@@ -442,16 +442,11 @@ function salvarGenerico(e, tipo, mensagem) {
   brinde(mensagem);
   render();
 }
-  const rows = state.records[type].slice(-8).reverse();
-  if(!rows.length) return `<div class="card"><h3>Histórico recente</h3><p class="small">Nenhum registro ainda.</p></div>`;
-  return `<div class="card"><h3>Histórico recente</h3><div class="table-wrap"><table><thead><tr><th>Data</th><th>Resumo</th><th>Ação</th></tr></thead><tbody>${rows.map(r=>`
-    <tr><td>${brDate(r.data)}</td><td>${summaryRecord(type,r)}</td><td><button class="ghost" onclick="deleteRecord('${type}','${r.id}')">Excluir</button></td></tr>`).join("")}</tbody></table></div></div>`;
-}
-
+  
 function tabelaRecente(tipo){
   const linhas = estado.registros[tipo].slice(-8).reverse();
 
-  if(!linhas.comprimento) {
+  if(!linhas.length) {
     return `<div class="card"><h3>Histórico recente</h3><p class="small">Nenhum registro ainda.</p></div>`;
   }
 
