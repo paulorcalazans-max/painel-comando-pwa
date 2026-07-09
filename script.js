@@ -582,3 +582,126 @@ document.addEventListener("DOMContentLoaded", ()=>{
   render();
   setInterval(checkReminder, 30000);
 });
+(() => {
+  function criarPainelBackup() {
+    if (document.getElementById("painel-backup-json")) return;
+
+    const painel = document.createElement("div");
+    painel.id = "painel-backup-json";
+    painel.style.position = "fixed";
+    painel.style.right = "16px";
+    painel.style.bottom = "16px";
+    painel.style.zIndex = "9999";
+    painel.style.display = "flex";
+    painel.style.flexDirection = "column";
+    painel.style.gap = "8px";
+    painel.style.padding = "10px";
+    painel.style.borderRadius = "14px";
+    painel.style.background = "rgba(255, 255, 255, 0.92)";
+    painel.style.boxShadow = "0 8px 24px rgba(0,0,0,0.18)";
+    painel.style.backdropFilter = "blur(8px)";
+
+    const botaoExportar = document.createElement("button");
+    botaoExportar.textContent = "Exportar backup";
+    botaoExportar.style.padding = "10px 12px";
+    botaoExportar.style.border = "0";
+    botaoExportar.style.borderRadius = "10px";
+    botaoExportar.style.cursor = "pointer";
+    botaoExportar.style.fontWeight = "700";
+
+    const botaoImportar = document.createElement("button");
+    botaoImportar.textContent = "Importar backup";
+    botaoImportar.style.padding = "10px 12px";
+    botaoImportar.style.border = "0";
+    botaoImportar.style.borderRadius = "10px";
+    botaoImportar.style.cursor = "pointer";
+    botaoImportar.style.fontWeight = "700";
+
+    const seletorArquivo = document.createElement("input");
+    seletorArquivo.type = "file";
+    seletorArquivo.accept = "application/json,.json";
+    seletorArquivo.style.display = "none";
+
+    botaoExportar.addEventListener("click", () => {
+      const dados = {};
+
+      for (let i = 0; i < localStorage.length; i++) {
+        const chave = localStorage.key(i);
+        dados[chave] = localStorage.getItem(chave);
+      }
+
+      const backup = {
+        app: "Painel de Comando PWA",
+        origem: location.href,
+        dataExportacao: new Date().toISOString(),
+        localStorage: dados
+      };
+
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: "application/json"
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "backup-painel-comando.json";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    });
+
+    botaoImportar.addEventListener("click", () => {
+      seletorArquivo.click();
+    });
+
+    seletorArquivo.addEventListener("change", async () => {
+      const arquivo = seletorArquivo.files[0];
+      if (!arquivo) return;
+
+      const confirmar = confirm(
+        "Importar este backup vai substituir os dados locais deste navegador. Deseja continuar?"
+      );
+
+      if (!confirmar) {
+        seletorArquivo.value = "";
+        return;
+      }
+
+      try {
+        const texto = await arquivo.text();
+        const backup = JSON.parse(texto);
+
+        if (!backup.localStorage || typeof backup.localStorage !== "object") {
+          alert("Arquivo de backup inválido.");
+          return;
+        }
+
+        localStorage.clear();
+
+        Object.entries(backup.localStorage).forEach(([chave, valor]) => {
+          localStorage.setItem(chave, valor);
+        });
+
+        alert("Backup importado com sucesso. O app será recarregado.");
+        location.reload();
+      } catch (erro) {
+        alert("Não foi possível importar o backup.");
+        console.error(erro);
+      } finally {
+        seletorArquivo.value = "";
+      }
+    });
+
+    painel.appendChild(botaoExportar);
+    painel.appendChild(botaoImportar);
+    painel.appendChild(seletorArquivo);
+    document.body.appendChild(painel);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", criarPainelBackup);
+  } else {
+    criarPainelBackup();
+  }
+})();
