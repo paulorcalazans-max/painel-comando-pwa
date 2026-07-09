@@ -212,14 +212,43 @@ function labelType(type){
   return {estudo:"Estudo",revisao:"Revisão",musculacao:"Musculação",corrida:"Corrida",sono:"Sono",batimentos:"Batimentos",auditoria:"Auditoria"}[type] || type;
 }
 
-function summaryRecord(type,r){
-  if(type==="estudo") return `${r.materia || "-"} — ${r.assunto || "-"} — ${r.tempo || 0} min — ${r.questoes || 0} questões`;
-  if(type==="revisao") return `${r.materia || "-"} — ${r.tipo || "-"} — ${r.tempo || 0} min`;
-  if(type==="musculacao") return `${r.grupo || "-"} — ${r.duracao || 0} min — esforço ${r.esforco || "-"}`;
-  if(type==="corrida") return `${r.distancia || 0} km — ${r.tempoTotal || "-"} — FC ${r.fcMedia || "-"}`;
-  if(type==="sono") return `${r.dormiu || "-"} até ${r.acordou || "-"} — qualidade ${r.qualidade || "-"}/10`;
-  if(type==="batimentos") return `mín. ${r.minima || "-"} / média ${r.media || "-"} / máx. ${r.maxima || "-"} — ${r.contexto || "-"}`;
-  return "";
+function summaryRecord(type, r) {
+  const observacao =
+    r.observacoes ||
+    r.observacao ||
+    r.obs ||
+    r.anotacoes ||
+    r.notas ||
+    r.detalhes ||
+    "";
+
+  const obs = observacao ? ` — Obs: ${observacao}` : "";
+
+  if (type === "estudo") {
+    return `${r.materia || "-"} — ${r.assunto || "-"} — ${r.tempo || 0} min — ${r.questoes || 0} questões${obs}`;
+  }
+
+  if (type === "revisao") {
+    return `${r.materia || "-"} — ${r.tipo || "-"} — ${r.tempo || 0} min${obs}`;
+  }
+
+  if (type === "musculacao") {
+    return `${r.grupo || "-"} — ${r.duracao || 0} min — esforço ${r.esforco || "-"}${obs}`;
+  }
+
+  if (type === "corrida") {
+    return `${r.distancia || 0} km — ${r.tempoTotal || "-"} — FC ${r.fcMedia || "-"}${obs}`;
+  }
+
+  if (type === "sono") {
+    return `${r.dormiu || "-"} até ${r.acordou || "-"} — qualidade ${r.qualidade || "-"}/10${obs}`;
+  }
+
+  if (type === "batimentos") {
+    return `mín. ${r.minima || "-"} / média ${r.media || "-"} / máx. ${r.maxima || "-"} — ${r.contexto || "-"}${obs}`;
+  }
+
+  return obs || "";
 }
 
 function startCycle(){
