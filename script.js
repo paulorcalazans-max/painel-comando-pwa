@@ -9,14 +9,47 @@ const subjects = [
   "Raciocínio Lógico"
 ];
 
-const quotes = [
-  "Pela resistência vencemos."
+const bookMessages = [
+  {
+    title: "Outliers, de Malcolm Gladwell",
+    message: "Na situação dos jogadores de hóquei canadenses, o corte etário de 1º de janeiro faz alguns atletas parecerem mais maduros. Eles recebem mais seleção e treino, acumulando uma vantagem que depois parece apenas talento individual."
+  },
+  {
+    title: "Disciplina é Destino, de Ryan Holiday",
+    message: "Ao apresentar figuras históricas como Lou Gehrig, o livro mostra a disciplina como prática de autocontrole: dominar emoções, pensamentos e ações para sustentar uma vida orientada por virtudes, não por excessos."
+  },
+  {
+    title: "Produtividade no trabalho, Harvard Business Review",
+    message: "Na situação de uma rotina cheia de demandas, a proposta é transformar prioridades em um cronograma executável. A produtividade aparece na gestão consciente do tempo e na organização das tarefas, não no volume de horas ocupadas."
+  }
+];
+
+const RECORD_TYPES = ["estudo", "revisao", "musculacao", "corrida", "sono", "batimentos", "medidas", "erros", "recuperacao", "simulados", "auditoria"];
+
+const defaultHabits = [
+  { id: "acordar", label: "Acordar no horário", active: true },
+  { id: "estudo", label: "Cumprir o bloco principal de estudo", active: true },
+  { id: "treino", label: "Executar o treino planejado", active: true },
+  { id: "leitura", label: "Leitura e revisão mental", active: true },
+  { id: "hidratacao", label: "Manter hidratação", active: true },
+  { id: "sono", label: "Preparar o sono no horário", active: true }
 ];
 
 const defaultState = {
   cycleIndex: 0,
   cycleRunning: false,
   cycleStart: null,
+  planning: {
+    target: "",
+    examDate: "",
+    weeklyStudyTarget: 20,
+    weeklyQuestionTarget: 200,
+    tasks: [],
+    syllabus: [],
+    habits: clone(defaultHabits),
+    checkins: {}
+  },
+  security: { pinHash: "", locked: false },
   records: {
     estudo: [],
     revisao: [],
@@ -24,31 +57,136 @@ const defaultState = {
     corrida: [],
     sono: [],
     batimentos: [],
+    medidas: [],
+    erros: [],
+    recuperacao: [],
+    simulados: [],
     auditoria: []
   }
 };
 
 let state = loadState();
 let deferredPrompt = null;
+let confirmResolver = null;
 
 function loadState() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return saved ? merge(defaultState, saved) : structuredClone(defaultState);
+    const raw = storageGet(STORAGE_KEY) || storageGet(`${STORAGE_KEY}_auto`);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const saved = parsed?.state?.records ? parsed.state : parsed;
+    return saved ? merge(defaultState, saved) : clone(defaultState);
   } catch (e) {
-    return structuredClone(defaultState);
+    return clone(defaultState);
   }
 }
 
 function merge(base, extra) {
-  const out = structuredClone(base);
-  Object.assign(out, extra || {});
-  out.records = Object.assign({}, base.records, (extra && extra.records) || {});
+  const source = extra && typeof extra === "object" ? extra : {};
+  const out = clone(base);
+  out.cycleIndex = Number.isInteger(source.cycleIndex) ? source.cycleIndex : base.cycleIndex;
+  out.cycleRunning = Boolean(source.cycleRunning);
+  out.cycleStart = source.cycleStart || null;
+  const planning = source.planning && typeof source.planning === "object" ? source.planning : {};
+  out.planning = {
+    ...clone(base.planning),
+    target: String(planning.target || ""),
+    examDate: normalizeOptionalDate(planning.examDate),
+    weeklyStudyTarget: Math.max(0, num(planning.weeklyStudyTarget || base.planning.weeklyStudyTarget)),
+    weeklyQuestionTarget: Math.max(0, num(planning.weeklyQuestionTarget || base.planning.weeklyQuestionTarget)),
+    tasks: Array.isArray(planning.tasks) ? planning.tasks.map((task, index) => normalizeTask(task, index)).filter(Boolean) : [],
+    syllabus: Array.isArray(planning.syllabus) ? planning.syllabus.map((item, index) => normalizeSyllabus(item, index)).filter(Boolean) : [],
+    habits: Array.isArray(planning.habits) && planning.habits.length
+      ? planning.habits.map((habit, index) => normalizeHabit(habit, index)).filter(Boolean)
+      : clone(defaultHabits),
+    checkins: planning.checkins && typeof planning.checkins === "object" ? planning.checkins : {}
+  };
+  const security = source.security && typeof source.security === "object" ? source.security : {};
+  out.security = { pinHash: String(security.pinHash || ""), locked: Boolean(security.locked) };
+  const sourceRecords = source.records && typeof source.records === "object" ? source.records : {};
+  out.records = {};
+  RECORD_TYPES.forEach(type => {
+    const records = Array.isArray(sourceRecords[type]) ? sourceRecords[type] : [];
+    out.records[type] = records.map((record, index) => normalizeRecord(type, record, index));
+  });
   return out;
 }
 
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function storageGet(key) {
+  try { return window.localStorage.getItem(key); } catch (e) { return null; }
+}
+
+function storageSet(key, value) {
+  try { window.localStorage.setItem(key, value); return true; } catch (e) { return false; }
+}
+
+function normalizeDate(value) {
+  if (!value) return todayISO();
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const br = text.match(/^(\d{2})[\\/.-](\d{2})[\\/.-](\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? todayISO() : parsed.toISOString().slice(0, 10);
+}
+
+function normalizeOptionalDate(value) {
+  if (!value) return "";
+  const normalized = normalizeDate(value);
+  return normalized === todayISO() && !String(value).trim().match(/\d{4}|\d{2}[\/.-]/) ? "" : normalized;
+}
+
+function normalizeTask(value, index = 0) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    id: String(value.id || `task-${Date.now()}-${index}`),
+    title: String(value.title || value.tarefa || "").trim(),
+    subject: String(value.subject || value.materia || "").trim(),
+    due: value.due ? normalizeDate(value.due) : todayISO(),
+    minutes: Math.max(0, num(value.minutes)),
+    questions: Math.max(0, num(value.questions)),
+    done: Boolean(value.done),
+    note: String(value.note || value.obs || "").trim()
+  };
+}
+
+function normalizeHabit(value, index = 0) {
+  if (!value || typeof value !== "object") return null;
+  const fallback = defaultHabits[index % defaultHabits.length];
+  return {
+    id: String(value.id || fallback.id || `habit-${index}`),
+    label: String(value.label || fallback.label || "Hábito").trim(),
+    active: value.active !== false
+  };
+}
+
+function normalizeSyllabus(value, index = 0) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    id: String(value.id || `edital-${Date.now()}-${index}`),
+    subject: String(value.subject || value.materia || "").trim(),
+    topic: String(value.topic || value.assunto || "").trim(),
+    status: ["Não iniciado", "Em estudo", "Revisado", "Dominado"].includes(value.status) ? value.status : "Não iniciado",
+    note: String(value.note || value.obs || "").trim()
+  };
+}
+
+function normalizeRecord(type, value, index = 0) {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+  record.id = String(record.id || `${type}-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`);
+  record.data = normalizeDate(record.data || record.date);
+  delete record.date;
+  return record;
+}
+
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  const serialized = JSON.stringify(state);
+  const saved = storageSet(STORAGE_KEY, serialized);
+  if (saved) storageSet(`${STORAGE_KEY}_auto`, JSON.stringify({ savedAt: new Date().toISOString(), state }));
+  return saved;
 }
 
 function uid() {
@@ -63,8 +201,18 @@ function todayISO() {
 
 function brDate(iso) {
   if (!iso) return "-";
-  const [y, m, d] = iso.split("-");
+  const [y, m, d] = normalizeDate(iso).split("-");
   return `${d}/${m}/${y}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+  }[char]));
+}
+
+function actionArg(value) {
+  return encodeURIComponent(String(value)).replace(/'/g, "%27");
 }
 
 function num(v) {
@@ -91,6 +239,39 @@ function toast(msg) {
   setTimeout(() => el.classList.remove("show"), 2600);
 }
 
+function requestConfirmation(message) {
+  const modal = document.getElementById("confirmModal");
+  if (!modal) return Promise.resolve(false);
+
+  document.getElementById("confirmMessage").textContent = message;
+  modal.classList.remove("hidden");
+
+  return new Promise(resolve => {
+    confirmResolver = resolve;
+  });
+}
+
+function closeConfirmation(result) {
+  const modal = document.getElementById("confirmModal");
+  if (modal) modal.classList.add("hidden");
+  if (confirmResolver) {
+    const resolve = confirmResolver;
+    confirmResolver = null;
+    resolve(result);
+  }
+}
+
+function showSuccess(message) {
+  const modal = document.getElementById("successModal");
+  if (!modal) return toast(message);
+  document.getElementById("successMessage").textContent = message;
+  modal.classList.remove("hidden");
+}
+
+function closeSuccess() {
+  document.getElementById("successModal")?.classList.add("hidden");
+}
+
 function setView(name) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
 
@@ -109,6 +290,13 @@ function setView(name) {
     corrida: "Corrida",
     sono: "Sono",
     batimentos: "Batimentos",
+    medidas: "Medidas e peso",
+    planejamento: "Planejamento",
+    habitos: "Hábitos e prontidão",
+    erros: "Banco de erros",
+    edital: "Mapa do edital",
+    recuperacao: "Recuperação",
+    prova: "Modo prova",
     historico: "Histórico",
     semanal: "Painel Semanal",
     auditoria: "Auditoria Semanal",
@@ -126,8 +314,7 @@ function render() {
   const todayLabel = document.getElementById("todayLabel");
   if (todayLabel) todayLabel.textContent = brDate(todayISO());
 
-  const rotatingQuote = document.getElementById("rotatingQuote");
-  if (rotatingQuote) rotatingQuote.textContent = "Pela resistência vencemos.";
+  renderBookMessage();
 
   renderHoje();
   renderEstudo();
@@ -136,6 +323,13 @@ function render() {
   renderCorrida();
   renderSono();
   renderBatimentos();
+  renderMedidas();
+  renderPlanejamento();
+  renderHabitos();
+  renderErros();
+  renderEdital();
+  renderRecuperacao();
+  renderProva();
   renderHistorico();
   renderSemanal();
   renderAuditoria();
@@ -151,7 +345,7 @@ function nextSubject() {
 }
 
 function todayRecords(type) {
-  return state.records[type].filter(r => r.data === todayISO() || r.date === todayISO());
+  return state.records[type].filter(r => r.data === todayISO());
 }
 
 function renderHoje() {
@@ -164,6 +358,12 @@ function renderHoje() {
   const treinos = todayRecords("musculacao").length;
   const sono = state.records.sono.find(r => r.data === todayISO());
   const bat = todayRecords("batimentos").at(-1);
+  const medida = todayRecords("medidas").at(-1);
+  const checkin = state.planning.checkins[todayISO()] || {};
+  const tasksToday = state.planning.tasks.filter(task => task.due === todayISO());
+  const completedTasks = tasksToday.filter(task => task.done).length;
+  const activeHabits = state.planning.habits.filter(habit => habit.active);
+  const completedHabits = activeHabits.filter(habit => checkin.habits?.[habit.id]).length;
 
   view.innerHTML = `
     <div class="grid">
@@ -190,6 +390,16 @@ function renderHoje() {
         </div>
       </div>
 
+      <div class="card command-card">
+        <div class="section-heading">
+          <div><h3>Missão de hoje</h3><p class="small">Execute o essencial antes de aumentar o volume.</p></div>
+          <span class="badge ${completedTasks === tasksToday.length && tasksToday.length ? "ok" : "warn"}">${completedTasks}/${tasksToday.length} tarefas</span>
+        </div>
+        <div class="progress"><div style="width:${tasksToday.length ? Math.round(completedTasks / tasksToday.length * 100) : 0}%"></div></div>
+        <p class="small">Hábitos cumpridos: <b>${completedHabits}/${activeHabits.length}</b>${state.planning.target ? ` | Foco: <b>${escapeHtml(state.planning.target)}</b>` : ""}</p>
+        <div class="actions"><button class="ghost" onclick="setView('planejamento')">Abrir plano</button><button class="ghost" onclick="setView('habitos')">Registrar prontidão</button></div>
+      </div>
+
       <div class="grid cols-4">
         <div class="card metric">
           <span class="label">Estudo</span>
@@ -211,6 +421,11 @@ function renderHoje() {
           <span class="value">${sono?.qualidade || "-"} /10</span>
           <span class="sub">FC média: ${bat?.media || "-"}</span>
         </div>
+        <div class="card metric">
+          <span class="label">Peso</span>
+          <span class="value">${medida?.peso || "-"}${medida?.peso ? " kg" : ""}</span>
+          <span class="sub">última medida do dia</span>
+        </div>
       </div>
 
       <div class="card">
@@ -231,6 +446,7 @@ function renderHoje() {
           <button class="ghost" onclick="setView('corrida')">Corrida</button>
           <button class="ghost" onclick="setView('sono')">Sono</button>
           <button class="ghost" onclick="setView('batimentos')">Batimentos</button>
+          <button class="ghost" onclick="setView('medidas')">Medidas e peso</button>
         </div>
       </div>
 
@@ -240,6 +456,15 @@ function renderHoje() {
       </div>
     </div>
   `;
+}
+
+function renderBookMessage() {
+  const index = Math.floor(Date.now() / 86400000) % bookMessages.length;
+  const book = bookMessages[index];
+  const title = document.getElementById("bookTitle");
+  const message = document.getElementById("bookMessage");
+  if (title) title.textContent = book.title;
+  if (message) message.textContent = book.message;
 }
 
 function timelineToday() {
@@ -267,7 +492,7 @@ function timelineToday() {
         <tbody>
           ${rows.map(r => `
             <tr>
-              <td><span class="badge">${labelType(r.type)}</span></td>
+              <td><span class="badge">${escapeHtml(labelType(r.type))}</span></td>
               <td>${r.text}</td>
             </tr>
           `).join("")}
@@ -284,6 +509,7 @@ function labelType(type) {
     corrida: "Corrida",
     sono: "Sono",
     batimentos: "Batimentos",
+    medidas: "Medidas e peso",
     auditoria: "Auditoria"
   }[type] || type;
 }
@@ -301,31 +527,51 @@ function summaryRecord(type, r) {
   const obs = observacao ? ` | Obs: ${observacao}` : "";
 
   if (type === "estudo") {
-    return `${r.materia || "-"} | ${r.assunto || "-"} | ${r.tempo || 0} min | ${r.questoes || 0} questões${obs}`;
+    return `${escapeHtml(r.materia || "-")} | ${escapeHtml(r.assunto || "-")} | ${escapeHtml(r.tempo || 0)} min | ${escapeHtml(r.questoes || 0)} questões${escapeHtml(obs)}`;
   }
 
   if (type === "revisao") {
-    return `${r.materia || "-"} | ${r.tipo || "-"} | ${r.tempo || 0} min${obs}`;
+    return `${escapeHtml(r.materia || "-")} | ${escapeHtml(r.tipo || "-")} | ${escapeHtml(r.tempo || 0)} min${escapeHtml(obs)}`;
   }
 
   if (type === "musculacao") {
-    return `${r.grupo || "-"} | ${r.duracao || 0} min | esforço ${r.esforco || "-"}${obs}`;
+    return `${escapeHtml(r.grupo || "-")} | ${escapeHtml(r.duracao || 0)} min | esforço ${escapeHtml(r.esforco || "-")}${escapeHtml(obs)}`;
   }
 
   if (type === "corrida") {
-    return `${r.distancia || 0} km | ${r.tempoTotal || "-"} | FC ${r.fcMedia || "-"}${obs}`;
+    return `${escapeHtml(r.distancia || 0)} km | ${escapeHtml(r.tempoTotal || "-")} | FC ${escapeHtml(r.fcMedia || "-")}${escapeHtml(obs)}`;
   }
 
   if (type === "sono") {
-    return `${r.dormiu || "-"} até ${r.acordou || "-"} | qualidade ${r.qualidade || "-"}/10${obs}`;
+    return `${escapeHtml(r.dormiu || "-")} até ${escapeHtml(r.acordou || "-")} | qualidade ${escapeHtml(r.qualidade || "-")}/10${escapeHtml(obs)}`;
   }
 
   if (type === "batimentos") {
-    return `mín. ${r.minima || "-"} | média ${r.media || "-"} | máx. ${r.maxima || "-"} | ${r.contexto || "-"}${obs}`;
+    return `mín. ${escapeHtml(r.minima || "-")} | média ${escapeHtml(r.media || "-")} | máx. ${escapeHtml(r.maxima || "-")} | ${escapeHtml(r.contexto || "-")}${escapeHtml(obs)}`;
+  }
+
+  if (type === "medidas") {
+    const bracoEsquerdo = r.bracoEsquerdo || r.braco || "-";
+    const bracoDireito = r.bracoDireito || "-";
+    const pernaEsquerda = r.pernaEsquerda || r.coxa || "-";
+    const pernaDireita = r.pernaDireita || "-";
+    return `peso ${escapeHtml(r.peso || "-")} kg | cintura ${escapeHtml(r.cintura || "-")} cm | braços E/D ${escapeHtml(bracoEsquerdo)}/${escapeHtml(bracoDireito)} cm | pernas E/D ${escapeHtml(pernaEsquerda)}/${escapeHtml(pernaDireita)} cm${escapeHtml(obs)}`;
   }
 
   if (type === "auditoria") {
-    return `${r.decisao || "-"} | prioridade: ${r.prioridade || "-"}${obs}`;
+    return `${escapeHtml(r.decisao || "-")} | prioridade: ${escapeHtml(r.prioridade || "-")}${escapeHtml(obs)}`;
+  }
+
+  if (type === "erros") {
+    return `${escapeHtml(r.materia || "-")} | ${escapeHtml(r.assunto || "-")} | causa: ${escapeHtml(r.causa || "-")} | ${escapeHtml(r.status || "Pendente")}${escapeHtml(obs)}`;
+  }
+
+  if (type === "recuperacao") {
+    return `${escapeHtml(r.tipo || "-")} | prontidão ${escapeHtml(r.prontidao || "-")}/10 | dor ${escapeHtml(r.dor || "-")}/10 | fadiga ${escapeHtml(r.fadiga || "-")}/10${escapeHtml(obs)}`;
+  }
+
+  if (type === "simulados") {
+    return `${escapeHtml(r.nome || "Simulado")} | ${escapeHtml(r.questoes || 0)} questões | ${escapeHtml(r.tempo || "-")} | ${escapeHtml(r.aproveitamento || 0)}%${escapeHtml(obs)}`;
   }
 
   return obs || "";
@@ -368,7 +614,7 @@ function formWrap(title, inner, onsubmit) {
 }
 
 function options(arr, selected = "") {
-  return arr.map(v => `<option ${v === selected ? "selected" : ""}>${v}</option>`).join("");
+  return arr.map(v => `<option ${v === selected ? "selected" : ""}>${escapeHtml(v)}</option>`).join("");
 }
 
 function saveGeneric(e, type, message, options = {}) {
@@ -404,10 +650,13 @@ function saveGeneric(e, type, message, options = {}) {
       const button = form.querySelector('button[type="submit"]');
       if (button) button.textContent = "Salvar registro";
 
-      saveState();
+      if (!saveState()) {
+        toast("Não foi possível gravar a alteração neste dispositivo.");
+        return;
+      }
       form.reset();
-      toast("Registro atualizado.");
       render();
+      showSuccess("A informação foi atualizada com sucesso.");
       return;
     }
   }
@@ -415,10 +664,13 @@ function saveGeneric(e, type, message, options = {}) {
   rec.id = uid();
   state.records[type].push(rec);
 
-  saveState();
+  if (!saveState()) {
+    toast("Não foi possível gravar a informação neste dispositivo.");
+    return;
+  }
   form.reset();
-  toast(message);
   render();
+  showSuccess(`A informação foi salva com sucesso. ${message}`);
 }
 
 function renderEstudo() {
@@ -578,6 +830,316 @@ function saveBatimentos(e) {
   saveGeneric(e, "batimentos", "Batimentos salvos.");
 }
 
+function renderMedidas() {
+  const view = document.getElementById("view-medidas");
+  if (!view) return;
+
+  const html = `
+    <div class="form-grid">
+      <div class="field"><label>Data</label><input name="data" type="date" value="${todayISO()}" required></div>
+      <div class="field"><label>Peso (kg)</label><input name="peso" type="number" step="0.1" min="0" placeholder="Ex.: 78,5"></div>
+      <div class="field"><label>Cintura (cm)</label><input name="cintura" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>Peito (cm)</label><input name="peito" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>Braço esquerdo (cm)</label><input name="bracoEsquerdo" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>Braço direito (cm)</label><input name="bracoDireito" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>Quadril (cm)</label><input name="quadril" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>Perna esquerda (cm)</label><input name="pernaEsquerda" type="number" step="0.1" min="0"></div>
+      <div class="field"><label>Perna direita (cm)</label><input name="pernaDireita" type="number" step="0.1" min="0"></div>
+      <div class="field full"><label>Observações</label><textarea name="obs" placeholder="Condições da medição, evolução, percepção corporal..."></textarea></div>
+    </div>`;
+
+  view.innerHTML = formWrap("Registrar medidas corporais e peso", html, "saveMedidas") + recentTable("medidas");
+}
+
+function renderPlanejamento() {
+  const view = document.getElementById("view-planejamento");
+  if (!view) return;
+
+  const plan = state.planning;
+  const todayTasks = plan.tasks.filter(task => task.due === todayISO());
+  const pending = plan.tasks.filter(task => !task.done).sort((a, b) => a.due.localeCompare(b.due));
+  const [start, end] = weekRange();
+  const studyMinutes = state.records.estudo.filter(r => inRange(r.data, start, end)).reduce((sum, r) => sum + num(r.tempo), 0);
+  const questionCount = state.records.estudo.filter(r => inRange(r.data, start, end)).reduce((sum, r) => sum + num(r.questoes), 0);
+
+  view.innerHTML = `
+    <div class="grid">
+      <div class="card">
+        <div class="section-heading"><div><h3>Direção da preparação</h3><p class="small">Defina o alvo e os números que conduzem sua semana.</p></div><span class="badge">${plan.examDate ? `Prova em ${brDate(plan.examDate)}` : "Pré-edital"}</span></div>
+        <form class="form" onsubmit="savePlanning(event)">
+          <div class="form-grid">
+            <div class="field full"><label>Concurso, cargo ou missão principal</label><input name="target" value="${escapeHtml(plan.target)}" placeholder="Ex.: CFO, carreira policial, concurso fiscal"></div>
+            <div class="field"><label>Data da prova (opcional)</label><input name="examDate" type="date" value="${escapeHtml(plan.examDate)}"></div>
+            <div class="field"><label>Meta semanal de estudo (min)</label><input name="weeklyStudyTarget" type="number" min="0" value="${plan.weeklyStudyTarget}"></div>
+            <div class="field"><label>Meta semanal de questões</label><input name="weeklyQuestionTarget" type="number" min="0" value="${plan.weeklyQuestionTarget}"></div>
+          </div>
+          <div class="actions"><button class="primary" type="submit">Salvar direção</button><button class="ghost" type="button" onclick="setView('auditoria')">Fazer auditoria</button></div>
+        </form>
+      </div>
+
+      <div class="grid cols-3">
+        <div class="card metric"><span class="label">Estudo na semana</span><span class="value">${studyMinutes}m</span><span class="sub">meta: ${plan.weeklyStudyTarget}m</span><div class="progress"><div style="width:${Math.min(100, plan.weeklyStudyTarget ? Math.round(studyMinutes / plan.weeklyStudyTarget * 100) : 0)}%"></div></div></div>
+        <div class="card metric"><span class="label">Questões na semana</span><span class="value">${questionCount}</span><span class="sub">meta: ${plan.weeklyQuestionTarget}</span><div class="progress"><div style="width:${Math.min(100, plan.weeklyQuestionTarget ? Math.round(questionCount / plan.weeklyQuestionTarget * 100) : 0)}%"></div></div></div>
+        <div class="card metric"><span class="label">Tarefas de hoje</span><span class="value">${todayTasks.filter(task => task.done).length}/${todayTasks.length}</span><span class="sub">${pending.length} pendente(s) no plano</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Adicionar tarefa objetiva</h3>
+        <form class="form" onsubmit="addPlanningTask(event)">
+          <div class="form-grid">
+            <div class="field full"><label>Tarefa</label><input name="title" required placeholder="Ex.: Direito Constitucional, controle de constitucionalidade"></div>
+            <div class="field"><label>Matéria</label><select name="subject">${options(subjects)}</select></div>
+            <div class="field"><label>Prazo</label><input name="due" type="date" value="${todayISO()}" required></div>
+            <div class="field"><label>Minutos previstos</label><input name="minutes" type="number" min="0" value="50"></div>
+            <div class="field"><label>Questões previstas</label><input name="questions" type="number" min="0" value="20"></div>
+            <div class="field full"><label>Critério de conclusão</label><input name="note" placeholder="Ex.: fechar aula 3 e corrigir 20 questões"></div>
+          </div>
+          <button class="primary" type="submit">Adicionar ao plano</button>
+        </form>
+      </div>
+
+      <div class="card"><h3>Fila de execução</h3>${pending.length ? `<div class="task-list">${pending.slice(0, 20).map(task => taskRow(task)).join("")}</div>` : `<p class="small">Nenhuma tarefa pendente. O plano está limpo.</p>`}</div>
+    </div>`;
+}
+
+function taskRow(task) {
+  return `<div class="task-row"><label class="inline"><input type="checkbox" ${task.done ? "checked" : ""} onchange="togglePlanningTask('${actionArg(task.id)}', this.checked)"><span><b>${escapeHtml(task.title)}</b><small>${escapeHtml(task.subject || "Sem matéria")} | ${brDate(task.due)} | ${task.minutes} min | ${task.questions} questões${task.note ? ` | ${escapeHtml(task.note)}` : ""}</small></span></label><button class="ghost" type="button" onclick="deletePlanningTask('${actionArg(task.id)}')">Excluir</button></div>`;
+}
+
+function savePlanning(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  state.planning.target = String(data.target || "").trim();
+  state.planning.examDate = data.examDate ? normalizeDate(data.examDate) : "";
+  state.planning.weeklyStudyTarget = Math.max(0, num(data.weeklyStudyTarget));
+  state.planning.weeklyQuestionTarget = Math.max(0, num(data.weeklyQuestionTarget));
+  if (!saveState()) return toast("Não foi possível salvar o planejamento.");
+  render();
+  showSuccess("Direção e metas semanais salvas com sucesso.");
+}
+
+function addPlanningTask(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  const task = normalizeTask({ ...data, id: uid() });
+  if (!task?.title) return toast("Informe uma tarefa.");
+  state.planning.tasks.push(task);
+  if (!saveState()) return toast("Não foi possível salvar a tarefa.");
+  render();
+  showSuccess("Tarefa adicionada ao plano com sucesso.");
+}
+
+function togglePlanningTask(encodedId, done) {
+  const task = state.planning.tasks.find(item => item.id === decodeURIComponent(encodedId));
+  if (!task) return;
+  task.done = Boolean(done);
+  if (!saveState()) return toast("Não foi possível atualizar a tarefa.");
+  render();
+}
+
+async function deletePlanningTask(encodedId) {
+  if (!await requestConfirmation("Excluir esta tarefa do plano?")) return;
+  const id = decodeURIComponent(encodedId);
+  state.planning.tasks = state.planning.tasks.filter(task => task.id !== id);
+  if (!saveState()) return toast("Não foi possível excluir a tarefa.");
+  render();
+  toast("Tarefa excluída.");
+}
+
+function renderHabitos() {
+  const view = document.getElementById("view-habitos");
+  if (!view) return;
+  const today = todayISO();
+  const checkin = state.planning.checkins[today] || {};
+  const habits = state.planning.habits.filter(habit => habit.active);
+  const completed = habits.filter(habit => checkin.habits?.[habit.id]).length;
+  const readiness = checkin.readiness || "";
+
+  view.innerHTML = `
+    <div class="grid cols-2">
+      <div class="card">
+        <div class="section-heading"><div><h3>Prontidão de hoje</h3><p class="small">Use o registro para calibrar o esforço, não para negociar com a missão.</p></div><span class="badge ${completed === habits.length && habits.length ? "ok" : "warn"}">${completed}/${habits.length}</span></div>
+        <form class="form" onsubmit="saveCheckin(event)">
+          <div class="field"><label>Prontidão física e mental (1-10)</label><input name="readiness" type="number" min="1" max="10" value="${escapeHtml(readiness)}" required></div>
+          <div class="field"><label>Humor e foco</label><select name="mood">${options(["Excelente", "Bom", "Estável", "Cansado", "Sob pressão"], checkin.mood || "Estável")}</select></div>
+          <div class="field full"><label>Nota de comando</label><textarea name="note" placeholder="Como você vai proteger o essencial hoje?">${escapeHtml(checkin.note || "")}</textarea></div>
+          <div class="habit-checklist">${habits.map(habit => `<label class="inline"><input name="habit-${escapeHtml(habit.id)}" type="checkbox" ${checkin.habits?.[habit.id] ? "checked" : ""}> ${escapeHtml(habit.label)}</label>`).join("")}</div>
+          <button class="primary" type="submit">Salvar prontidão</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>Hábitos do sistema</h3>
+        <p class="small">Mantenha poucos hábitos essenciais. Consistência vence uma lista impossível.</p>
+        <form class="form" onsubmit="addHabit(event)">
+          <div class="field"><label>Novo hábito</label><input name="label" required placeholder="Ex.: 20 minutos de mobilidade"></div>
+          <button class="ghost" type="submit">Adicionar hábito</button>
+        </form>
+        <div class="habit-list">${state.planning.habits.map(habit => `<div class="task-row"><span>${escapeHtml(habit.label)}</span><button class="ghost" type="button" onclick="toggleHabit('${actionArg(habit.id)}')">${habit.active ? "Desativar" : "Ativar"}</button></div>`).join("")}</div>
+      </div>
+    </div>`;
+}
+
+function saveCheckin(event) {
+  event.preventDefault();
+  const form = event.target;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const habits = {};
+  state.planning.habits.filter(habit => habit.active).forEach(habit => { habits[habit.id] = Boolean(form.elements[`habit-${habit.id}`]?.checked); });
+  state.planning.checkins[todayISO()] = { readiness: num(data.readiness), mood: data.mood, note: String(data.note || "").trim(), habits };
+  if (!saveState()) return toast("Não foi possível salvar a prontidão.");
+  render();
+  showSuccess("Prontidão e hábitos de hoje salvos com sucesso.");
+}
+
+function addHabit(event) {
+  event.preventDefault();
+  const label = String(new FormData(event.target).get("label") || "").trim();
+  if (!label) return;
+  state.planning.habits.push({ id: uid(), label, active: true });
+  if (!saveState()) return toast("Não foi possível salvar o hábito.");
+  render();
+  showSuccess("Hábito adicionado com sucesso.");
+}
+
+function toggleHabit(encodedId) {
+  const habit = state.planning.habits.find(item => item.id === decodeURIComponent(encodedId));
+  if (!habit) return;
+  habit.active = !habit.active;
+  if (!saveState()) return toast("Não foi possível atualizar o hábito.");
+  render();
+}
+
+function renderErros() {
+  const view = document.getElementById("view-erros");
+  if (!view) return;
+  const errors = state.records.erros;
+  const groups = {};
+  errors.forEach(error => {
+    const key = `${error.materia || "Sem matéria"} | ${error.assunto || "Sem assunto"}`;
+    groups[key] = (groups[key] || 0) + 1;
+  });
+  const repeated = Object.entries(groups).filter(([, count]) => count > 1).sort((a, b) => b[1] - a[1]);
+  const total = errors.length;
+  view.innerHTML = `
+    <div class="grid">
+      <div class="card"><h3>Registrar erro</h3>
+        <form class="form" onsubmit="saveErro(event)"><div class="form-grid">
+          <div class="field"><label>Matéria</label><select name="materia">${options(subjects)}</select></div>
+          <div class="field"><label>Assunto</label><input name="assunto" required placeholder="Ex.: crase, atos administrativos"></div>
+          <div class="field full"><label>Erro cometido</label><textarea name="erro" required placeholder="O que você marcou ou explicou errado?"></textarea></div>
+          <div class="field"><label>Causa</label><select name="causa">${options(["Desatenção", "Falta de teoria", "Esquecimento", "Interpretação", "Pressa", "Outra"])}</select></div>
+          <div class="field"><label>Status</label><select name="status">${options(["Pendente", "Revisado", "Corrigido"])}</select></div>
+          <div class="field full"><label>Correção</label><textarea name="correcao" required placeholder="Regra, raciocínio ou procedimento correto"></textarea></div>
+          <div class="field full"><label>Observações</label><textarea name="obs"></textarea></div>
+        </div><button class="primary" type="submit">Salvar erro</button></form>
+      </div>
+      <div class="grid cols-3">
+        <div class="card metric"><span class="label">Erros registrados</span><span class="value">${total}</span><span class="sub">histórico completo</span></div>
+        <div class="card metric"><span class="label">Pontos recorrentes</span><span class="value">${repeated.length}</span><span class="sub">assuntos com repetição</span></div>
+        <div class="card metric"><span class="label">Reincidência</span><span class="value">${total ? Math.round(errors.filter(error => groups[`${error.materia || "Sem matéria"} | ${error.assunto || "Sem assunto"}`] > 1).length / total * 100) : 0}%</span><span class="sub">registros em pontos repetidos</span></div>
+      </div>
+      <div class="card"><h3>Revisão automática dos recorrentes</h3>${repeated.length ? repeated.map(([key, count]) => `<p><span class="badge danger">${count}x</span> <b>${escapeHtml(key)}</b></p>`).join("") : `<p class="small">Ainda não há reincidências. Continue registrando os erros sem julgamento.</p>`}</div>
+      ${recentTable("erros")}
+    </div>`;
+}
+
+function saveErro(event) {
+  saveGeneric(event, "erros", "Erro registrado para revisão.");
+}
+
+function renderEdital() {
+  const view = document.getElementById("view-edital");
+  if (!view) return;
+  const items = state.planning.syllabus;
+  const counts = ["Não iniciado", "Em estudo", "Revisado", "Dominado"].map(status => ({ status, count: items.filter(item => item.status === status).length }));
+  const coverage = items.length ? Math.round(items.filter(item => ["Revisado", "Dominado"].includes(item.status)).length / items.length * 100) : 0;
+  view.innerHTML = `
+    <div class="grid">
+      <div class="card"><div class="section-heading"><div><h3>Mapa do edital</h3><p class="small">Transforme o conteúdo em uma superfície visível de avanço.</p></div><span class="badge ok">${coverage}% coberto</span></div>
+        <form class="form" onsubmit="addSyllabusItem(event)"><div class="form-grid"><div class="field"><label>Disciplina</label><select name="subject">${options(subjects)}</select></div><div class="field"><label>Assunto</label><input name="topic" required placeholder="Ex.: controle de constitucionalidade"></div><div class="field"><label>Status</label><select name="status">${options(["Não iniciado", "Em estudo", "Revisado", "Dominado"])}</select></div><div class="field"><label>Observação</label><input name="note" placeholder="Fonte ou próximo passo"></div></div><button class="primary" type="submit">Adicionar assunto</button></form>
+      </div>
+      <div class="grid cols-4">${counts.map(item => `<div class="card metric"><span class="label">${item.status}</span><span class="value">${item.count}</span><span class="sub">assunto(s)</span></div>`).join("")}</div>
+      <div class="card"><h3>Conteúdo cadastrado</h3>${items.length ? `<div class="task-list">${items.map(item => `<div class="task-row"><span><b>${escapeHtml(item.subject)}: ${escapeHtml(item.topic)}</b><small>${escapeHtml(item.note || "Sem observação")}</small></span><select aria-label="Status de ${escapeHtml(item.topic)}" onchange="updateSyllabusStatus('${actionArg(item.id)}', this.value)">${options(["Não iniciado", "Em estudo", "Revisado", "Dominado"], item.status)}</select></div>`).join("")}</div>` : `<p class="small">Cadastre os assuntos do seu edital para acompanhar a cobertura real.</p>`}</div>
+    </div>`;
+}
+
+function addSyllabusItem(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  const item = normalizeSyllabus({ ...data, id: uid() });
+  if (!item?.topic) return toast("Informe o assunto do edital.");
+  state.planning.syllabus.push(item);
+  if (!saveState()) return toast("Não foi possível salvar o assunto.");
+  render();
+  showSuccess("Assunto adicionado ao mapa do edital.");
+}
+
+function updateSyllabusStatus(encodedId, status) {
+  const item = state.planning.syllabus.find(entry => entry.id === decodeURIComponent(encodedId));
+  if (!item) return;
+  item.status = status;
+  if (!saveState()) return toast("Não foi possível atualizar o edital.");
+  render();
+}
+
+function readinessScore() {
+  const today = todayISO();
+  const checkin = state.planning.checkins[today];
+  const sleep = todayRecords("sono").at(-1);
+  const study = todayRecords("estudo").reduce((sum, record) => sum + num(record.tempo), 0);
+  const training = todayRecords("musculacao").length + todayRecords("corrida").length;
+  const habits = state.planning.habits.filter(habit => habit.active);
+  const habitsDone = habits.filter(habit => checkin?.habits?.[habit.id]).length;
+  const parts = [num(checkin?.readiness), num(sleep?.qualidade), Math.min(10, study / 30), Math.min(10, habits.length ? habitsDone / habits.length * 10 : 0)].filter(value => value > 0);
+  return parts.length ? Math.round(parts.reduce((sum, value) => sum + value, 0) / parts.length * 10) / 10 : 0;
+}
+
+function weeklyReviewSummary() {
+  const [start, end] = weekRange();
+  const studies = state.records.estudo.filter(record => inRange(record.data, start, end));
+  const totalMinutes = studies.reduce((sum, record) => sum + num(record.tempo), 0);
+  const questions = studies.reduce((sum, record) => sum + num(record.questoes), 0);
+  const bySubject = {};
+  studies.forEach(record => { bySubject[record.materia] = (bySubject[record.materia] || 0) + num(record.tempo); });
+  const neglected = subjects.filter(subject => !bySubject[subject]).slice(0, 2);
+  const goal = state.planning.weeklyStudyTarget;
+  return { totalMinutes, questions, neglected, recommendation: goal && totalMinutes < goal ? `Recupere ${goal - totalMinutes} minutos de estudo na próxima semana.` : "Mantenha o ritmo e aumente a qualidade das questões." };
+}
+
+function renderRecuperacao() {
+  const view = document.getElementById("view-recuperacao");
+  if (!view) return;
+  const summary = weeklyReviewSummary();
+  const todayLoad = todayRecords("musculacao").reduce((sum, record) => sum + num(record.esforco), 0) + todayRecords("corrida").length * 5;
+  const sleep = todayRecords("sono").at(-1);
+  const warning = todayLoad >= 8 && num(sleep?.qualidade) > 0 && num(sleep.qualidade) <= 5;
+  view.innerHTML = `<div class="grid cols-2"><div class="card"><h3>Registrar recuperação</h3><form class="form" onsubmit="saveRecuperacao(event)"><div class="form-grid"><div class="field"><label>Data</label><input name="data" type="date" value="${todayISO()}" required></div><div class="field"><label>Tipo</label><select name="tipo">${options(["Treino leve", "Mobilidade", "Descanso", "Caminhada", "Alongamento", "Outro"])}</select></div><div class="field"><label>Prontidão (1-10)</label><input name="prontidao" type="number" min="1" max="10" value="7"></div><div class="field"><label>Dor (0-10)</label><input name="dor" type="number" min="0" max="10" value="0"></div><div class="field"><label>Fadiga (0-10)</label><input name="fadiga" type="number" min="0" max="10" value="0"></div><div class="field"><label>Duração (min)</label><input name="duracao" type="number" min="0" value="20"></div><div class="field full"><label>Observações</label><textarea name="obs" placeholder="Região dolorida, sensação corporal, ajuste feito..."></textarea></div></div><button class="primary" type="submit">Salvar recuperação</button></form></div><div class="card"><h3>Leitura de carga</h3><p class="${warning ? "warning-text" : "small"}">${warning ? "O volume de treino e o sono baixo sugerem reduzir a intensidade hoje." : "Nenhum sinal forte de excesso foi identificado pelos registros atuais."}</p><h4>Revisão semanal automática</h4><p>Estudo: <b>${summary.totalMinutes} min</b> | Questões: <b>${summary.questions}</b></p><p>Matérias negligenciadas: <b>${escapeHtml(summary.neglected.join(", ") || "nenhuma")}</b></p><p><b>Ajuste:</b> ${escapeHtml(summary.recommendation)}</p><p class="small">Índice de prontidão atual: ${readinessScore()}/10</p></div></div>${recentTable("recuperacao")}`;
+}
+
+function saveRecuperacao(event) {
+  saveGeneric(event, "recuperacao", "Registro de recuperação salvo.");
+}
+
+function renderProva() {
+  const view = document.getElementById("view-prova");
+  if (!view) return;
+  const examDate = state.planning.examDate;
+  const days = examDate ? Math.max(0, Math.ceil((new Date(`${examDate}T00:00:00`) - new Date(`${todayISO()}T00:00:00`)) / 86400000)) : null;
+  const exams = state.records.simulados;
+  const avg = exams.length ? Math.round(exams.reduce((sum, exam) => sum + num(exam.aproveitamento), 0) / exams.length * 10) / 10 : 0;
+  view.innerHTML = `<div class="grid"><div class="card"><div class="section-heading"><div><h3>Modo prova</h3><p class="small">A contagem começa quando você informa a data no Planejamento.</p></div><span class="badge ${days !== null && days <= 30 ? "danger" : "ok"}">${days === null ? "Sem data" : `${days} dia(s)`}</span></div><p class="countdown">${days === null ? "Defina a data da prova para iniciar a contagem." : days === 0 ? "A prova é hoje." : `${days} dia(s) até a prova.`}</p><button class="ghost" onclick="setView('planejamento')">Ajustar data e metas</button></div><div class="grid cols-3"><div class="card metric"><span class="label">Simulados</span><span class="value">${exams.length}</span><span class="sub">registrados</span></div><div class="card metric"><span class="label">Aproveitamento médio</span><span class="value">${avg}%</span><span class="sub">evolução acumulada</span></div><div class="card metric"><span class="label">Tempo médio</span><span class="value">${exams.length ? escapeHtml(exams.at(-1).tempo || "-") : "-"}</span><span class="sub">último registro</span></div></div><div class="card"><h3>Registrar simulado</h3><form class="form" onsubmit="saveSimulado(event)"><div class="form-grid"><div class="field"><label>Nome/banca</label><input name="nome" required placeholder="Ex.: Simulado Cebraspe 01"></div><div class="field"><label>Data</label><input name="data" type="date" value="${todayISO()}" required></div><div class="field"><label>Questões</label><input name="questoes" type="number" min="0" value="100"></div><div class="field"><label>Acertos</label><input name="acertos" type="number" min="0" value="0"></div><div class="field"><label>Tempo total</label><input name="tempo" placeholder="Ex.: 03:30:00"></div><div class="field"><label>Aproveitamento</label><input name="aproveitamento" value="0%" readonly></div><div class="field full"><label>Observações</label><textarea name="obs"></textarea></div></div><button class="primary" type="submit">Salvar simulado</button></form></div>${recentTable("simulados")}</div>`;
+  const form = view.querySelector("form");
+  if (form) form.elements.acertos?.addEventListener("input", () => { form.elements.aproveitamento.value = `${percent(form.elements.acertos.value, form.elements.questoes.value)}%`; });
+}
+
+function saveSimulado(event) {
+  saveGeneric(event, "simulados", "Simulado salvo.", { beforeSave: record => { record.aproveitamento = percent(record.acertos, record.questoes); } });
+}
+
+function saveMedidas(e) {
+  saveGeneric(e, "medidas", "Medidas e peso salvos.");
+}
+
 function recentTable(type) {
   const rows = state.records[type].slice(-8).reverse();
 
@@ -600,11 +1162,11 @@ function recentTable(type) {
           <tbody>
             ${rows.map(r => `
               <tr>
-                <td>${brDate(r.data)}</td>
+        <td>${brDate(r.data)}</td>
                 <td>${summaryRecord(type, r)}</td>
                 <td>
-                  <button class="ghost" onclick="editRecord('${type}', '${r.id}')">Editar</button>
-                  <button class="ghost" onclick="deleteRecord('${type}', '${r.id}')">Excluir</button>
+                  <button class="ghost" onclick="editRecord('${type}', '${actionArg(r.id)}')">Editar</button>
+                  <button class="ghost" onclick="deleteRecord('${type}', '${actionArg(r.id)}')">Excluir</button>
                 </td>
               </tr>
             `).join("")}
@@ -615,6 +1177,7 @@ function recentTable(type) {
 }
 
 function editRecord(type, id) {
+  id = decodeURIComponent(id);
   const record = state.records[type].find(r => r.id === id);
 
   if (!record) {
@@ -661,8 +1224,9 @@ function editRecord(type, id) {
   }, 150);
 }
 
-function deleteRecord(type, id) {
-  if (!confirm("Excluir este registro?")) return;
+async function deleteRecord(type, encodedId) {
+  const id = decodeURIComponent(encodedId);
+  if (!await requestConfirmation("Excluir este registro?")) return;
 
   state.records[type] = state.records[type].filter(r => r.id !== id);
 
@@ -704,8 +1268,8 @@ function renderHistorico() {
                   <td>${brDate(r.data)}</td>
                   <td>${summaryRecord(r.type, r)}</td>
                   <td>
-                    <button class="ghost" onclick="editRecord('${r.type}', '${r.id}')">Editar</button>
-                    <button class="ghost" onclick="deleteRecord('${r.type}', '${r.id}')">Excluir</button>
+                    <button class="ghost" onclick="editRecord('${r.type}', '${actionArg(r.id)}')">Editar</button>
+                    <button class="ghost" onclick="deleteRecord('${r.type}', '${actionArg(r.id)}')">Excluir</button>
                   </td>
                 </tr>
               `).join("")
@@ -771,12 +1335,17 @@ function renderSemanal() {
       <div class="card">
         <h3>Tempo por matéria</h3>
         ${Object.keys(bySubject).length
-          ? Object.entries(bySubject).map(([k, v]) => `<p><b>${k}</b>: ${v} min</p>`).join("")
+          ? Object.entries(bySubject).map(([k, v]) => `<p><b>${escapeHtml(k)}</b>: ${v} min</p>`).join("")
           : `<p class="small">Nenhum estudo registrado nesta semana.</p>`}
       </div>
       <div class="card">
         <h3>Questões</h3>
         <p>Feitas: <b>${questoes}</b> | Acertos: <b>${acertos}</b> | Erros: <b>${erros}</b> | Aproveitamento: <b>${percent(acertos, questoes)}%</b></p>
+      </div>
+      <div class="card">
+        <h3>Revisão automática da semana</h3>
+        <p><b>Matéria negligenciada:</b> ${escapeHtml(weeklyReviewSummary().neglected.join(", ") || "nenhuma")}</p>
+        <p><b>Ajuste recomendado:</b> ${escapeHtml(weeklyReviewSummary().recommendation)}</p>
       </div>
     </div>`;
 }
@@ -831,7 +1400,49 @@ function renderBackup() {
         <p>Use apenas se tiver backup.</p>
         <button class="danger" onclick="clearAll()">Apagar tudo</button>
       </div>
+      <div class="card">
+        <h3>Privacidade local</h3>
+        <p>Os registros ficam neste dispositivo. O backup automático local é atualizado junto com cada salvamento.</p>
+        <form class="form" onsubmit="setPin(event)">
+          <div class="field"><label>PIN opcional de bloqueio</label><input name="pin" type="password" inputmode="numeric" minlength="4" maxlength="12" placeholder="4 a 12 dígitos"></div>
+          <div class="actions"><button class="ghost" type="submit">Definir PIN</button><button class="ghost" type="button" onclick="lockApp()">Bloquear agora</button></div>
+        </form>
+      </div>
     </div>`;
+}
+
+async function hashPin(pin) {
+  const data = new TextEncoder().encode(pin);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function setPin(event) {
+  event.preventDefault();
+  const pin = String(new FormData(event.target).get("pin") || "");
+  if (!/^\d{4,12}$/.test(pin)) return toast("Use um PIN numérico de 4 a 12 dígitos.");
+  state.security.pinHash = await hashPin(pin);
+  state.security.locked = false;
+  if (!saveState()) return toast("Não foi possível salvar o PIN neste dispositivo.");
+  event.target.reset();
+  showSuccess("PIN definido. Seus dados continuam armazenados apenas neste dispositivo.");
+}
+
+function lockApp() {
+  if (!state.security.pinHash) return toast("Defina um PIN antes de bloquear o painel.");
+  state.security.locked = true;
+  saveState();
+  document.getElementById("lockModal")?.classList.remove("hidden");
+}
+
+async function unlockApp(event) {
+  event.preventDefault();
+  const pin = String(new FormData(event.target).get("pin") || "");
+  if (await hashPin(pin) !== state.security.pinHash) return toast("PIN incorreto.");
+  state.security.locked = false;
+  saveState();
+  event.target.reset();
+  document.getElementById("lockModal")?.classList.add("hidden");
 }
 
 function exportBackup() {
@@ -844,11 +1455,17 @@ function exportBackup() {
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
 
-  a.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  a.href = url;
   a.download = `painel-comando-backup-${todayISO()}.json`;
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
-
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 1000);
+  toast("Backup exportado com sucesso.");
 }
 
 function importBackup() {
@@ -859,26 +1476,14 @@ function importBackup() {
 
   const reader = new FileReader();
 
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
-      const data = JSON.parse(reader.result);
-      let importedState = null;
-
-      if (data.state && data.state.records) {
-        importedState = data.state;
-      } else if (data.records) {
-        importedState = data;
-      } else if (data.localStorage && data.localStorage[STORAGE_KEY]) {
-        importedState = JSON.parse(data.localStorage[STORAGE_KEY]);
-      }
-
-      if (!importedState || !importedState.records) {
-        throw new Error("Formato inválido.");
-      }
-
+      const importedState = parseBackup(JSON.parse(reader.result));
+      if (!importedState) throw new Error("Formato inválido.");
+      if (!await requestConfirmation("Importar este backup substituirá os dados atuais. Você já conferiu o arquivo?")) return;
       state = merge(defaultState, importedState);
-      saveState();
-      toast("Backup importado.");
+      if (!saveState()) throw new Error("Não foi possível gravar o backup.");
+      toast("Backup importado com sucesso.");
       render();
     } catch (e) {
       console.error(e);
@@ -889,105 +1494,21 @@ function importBackup() {
   reader.readAsText(file);
 }
 
-function clearAll() {
-  if (!confirm("Apagar todos os dados locais?")) return;
-
-  state = structuredClone(defaultState);
-  saveState();
-  toast("Dados apagados.");
-  render();
+function parseBackup(data) {
+  let importedState = null;
+  if (data?.state?.records) importedState = data.state;
+  else if (data?.records) importedState = data;
+  else if (data?.localStorage?.[STORAGE_KEY]) importedState = JSON.parse(data.localStorage[STORAGE_KEY]);
+  return importedState?.records ? importedState : null;
 }
 
-function createFloatingBackupPanel() {
-  if (document.getElementById("painel-backup-json")) return;
+async function clearAll() {
+  if (!await requestConfirmation("Apagar todos os dados locais? Esta ação exige um backup para ser desfeita.")) return;
 
-  const panel = document.createElement("div");
-  panel.id = "painel-backup-json";
-  panel.style.position = "fixed";
-  panel.style.right = "16px";
-  panel.style.bottom = "16px";
-  panel.style.zIndex = "9999";
-  panel.style.display = "flex";
-  panel.style.flexDirection = "column";
-  panel.style.gap = "8px";
-  panel.style.padding = "10px";
-  panel.style.borderRadius = "14px";
-  panel.style.background = "rgba(255, 255, 255, 0.92)";
-  panel.style.boxShadow = "0 8px 24px rgba(0,0,0,0.18)";
-  panel.style.backdropFilter = "blur(8px)";
-
-  const exportButton = document.createElement("button");
-  exportButton.textContent = "Exportar backup";
-  exportButton.style.padding = "10px 12px";
-  exportButton.style.border = "0";
-  exportButton.style.borderRadius = "10px";
-  exportButton.style.cursor = "pointer";
-  exportButton.style.fontWeight = "700";
-
-  const importButton = document.createElement("button");
-  importButton.textContent = "Importar backup";
-  importButton.style.padding = "10px 12px";
-  importButton.style.border = "0";
-  importButton.style.borderRadius = "10px";
-  importButton.style.cursor = "pointer";
-  importButton.style.fontWeight = "700";
-
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = "application/json,.json";
-  fileInput.style.display = "none";
-
-  exportButton.addEventListener("click", exportBackup);
-
-  importButton.addEventListener("click", () => {
-    fileInput.click();
-  });
-
-  fileInput.addEventListener("change", async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-
-    const confirmed = confirm("Importar este backup vai substituir os dados locais deste navegador. Deseja continuar?");
-
-    if (!confirmed) {
-      fileInput.value = "";
-      return;
-    }
-
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      let importedState = null;
-
-      if (data.state && data.state.records) {
-        importedState = data.state;
-      } else if (data.records) {
-        importedState = data;
-      } else if (data.localStorage && data.localStorage[STORAGE_KEY]) {
-        importedState = JSON.parse(data.localStorage[STORAGE_KEY]);
-      }
-
-      if (!importedState || !importedState.records) {
-        throw new Error("Formato inválido.");
-      }
-
-      state = merge(defaultState, importedState);
-      saveState();
-
-      alert("Backup importado com sucesso. O app será recarregado.");
-      location.reload();
-    } catch (error) {
-      alert("Não foi possível importar o backup.");
-      console.error(error);
-    } finally {
-      fileInput.value = "";
-    }
-  });
-
-  panel.appendChild(exportButton);
-  panel.appendChild(importButton);
-  panel.appendChild(fileInput);
-  document.body.appendChild(panel);
+  state = clone(defaultState);
+  if (!saveState()) return toast("Não foi possível apagar os dados neste dispositivo.");
+  toast("Dados apagados.");
+  render();
 }
 
 async function enableNotifications() {
@@ -1014,9 +1535,9 @@ function checkReminder() {
     "20:45": "Fechamento do dia: alimente o Painel de Comando."
   };
 
-  if (reminders[hm] && !localStorage.getItem(key)) {
+  if (reminders[hm] && !storageGet(key)) {
     new Notification("Painel de Comando", { body: reminders[hm] });
-    localStorage.setItem(key, "1");
+    storageSet(key, "1");
   }
 }
 
@@ -1053,6 +1574,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   render();
-  createFloatingBackupPanel();
+  document.getElementById("confirmCancel")?.addEventListener("click", () => closeConfirmation(false));
+  document.getElementById("confirmAccept")?.addEventListener("click", () => closeConfirmation(true));
+  document.getElementById("confirmModal")?.addEventListener("click", event => {
+    if (event.target.id === "confirmModal") closeConfirmation(false);
+  });
+  document.getElementById("successAccept")?.addEventListener("click", closeSuccess);
+  document.getElementById("successModal")?.addEventListener("click", event => {
+    if (event.target.id === "successModal") closeSuccess();
+  });
+  if (state.security.locked && state.security.pinHash) document.getElementById("lockModal")?.classList.remove("hidden");
   setInterval(checkReminder, 30000);
 });

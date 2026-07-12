@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#111827" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Comando" />
   <title>Painel de Comando</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="style.css" />
@@ -29,6 +32,13 @@
         <button data-view="corrida" class="nav-btn">Corrida</button>
         <button data-view="sono" class="nav-btn">Sono</button>
         <button data-view="batimentos" class="nav-btn">Batimentos</button>
+        <button data-view="medidas" class="nav-btn">Medidas e peso</button>
+        <button data-view="planejamento" class="nav-btn">Planejamento</button>
+        <button data-view="habitos" class="nav-btn">Hábitos e prontidão</button>
+        <button data-view="erros" class="nav-btn">Banco de erros</button>
+        <button data-view="edital" class="nav-btn">Mapa do edital</button>
+        <button data-view="recuperacao" class="nav-btn">Recuperação</button>
+        <button data-view="prova" class="nav-btn">Modo prova</button>
         <button data-view="historico" class="nav-btn">Histórico</button>
         <button data-view="semanal" class="nav-btn">Painel Semanal</button>
         <button data-view="auditoria" class="nav-btn">Auditoria Semanal</button>
@@ -49,8 +59,8 @@
       </header>
 
       <section id="quoteBox" class="quote-card">
-        <strong>"Pela resistência vencemos".</strong>
-        <span id="rotatingQuote"></span>
+        <strong id="bookTitle"></strong>
+        <span id="bookMessage"></span>
       </section>
 
       <section id="view-hoje" class="view active"></section>
@@ -60,6 +70,13 @@
       <section id="view-corrida" class="view"></section>
       <section id="view-sono" class="view"></section>
       <section id="view-batimentos" class="view"></section>
+      <section id="view-medidas" class="view"></section>
+      <section id="view-planejamento" class="view"></section>
+      <section id="view-habitos" class="view"></section>
+      <section id="view-erros" class="view"></section>
+      <section id="view-edital" class="view"></section>
+      <section id="view-recuperacao" class="view"></section>
+      <section id="view-prova" class="view"></section>
       <section id="view-historico" class="view"></section>
       <section id="view-semanal" class="view"></section>
       <section id="view-auditoria" class="view"></section>
@@ -68,6 +85,35 @@
   </div>
 
   <div id="toast" class="toast"></div>
+  <div id="confirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="modal-box">
+      <h3 id="confirmTitle">Confirmar ação</h3>
+      <p id="confirmMessage"></p>
+      <div class="actions">
+        <button id="confirmCancel" class="ghost" type="button">Cancelar</button>
+        <button id="confirmAccept" class="danger" type="button">Confirmar</button>
+      </div>
+    </div>
+  </div>
+  <div id="successModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="successTitle">
+    <div class="modal-box">
+      <h3 id="successTitle">Informação salva</h3>
+      <p id="successMessage"></p>
+      <div class="actions">
+        <button id="successAccept" class="primary" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+  <div id="lockModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="lockTitle">
+    <div class="modal-box">
+      <h3 id="lockTitle">Painel bloqueado</h3>
+      <p>Digite o PIN local para acessar seus registros.</p>
+      <form class="form" onsubmit="unlockApp(event)">
+        <div class="field"><label>PIN</label><input name="pin" type="password" inputmode="numeric" autocomplete="off" required></div>
+        <button class="primary" type="submit">Desbloquear</button>
+      </form>
+    </div>
+  </div>
   <script src="script.js"></script>
 </body>
 </html>

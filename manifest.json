@@ -1,8 +1,10 @@
 {
   "name": "Painel de Comando",
   "short_name": "Comando",
-  "description": "PWA pessoal para estudo, revisão, treino, sono e batimentos.",
-  "start_url": "./index.html",
+  "description": "PWA pessoal para estudo, revisão, treino, sono, batimentos e medidas corporais.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f3f4f6",
   "theme_color": "#111827",
